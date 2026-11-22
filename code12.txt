@@ -1,0 +1,1145 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LP = Players.LocalPlayer
+local PlayerGui = LP:WaitForChild("PlayerGui")
+
+local getupvalues = (debug and debug.getupvalues) or getupvalues
+local getconns    = getconnections or (debug and debug.getconnections)
+local setupv      = (debug and debug.setupvalue) or setupvalue
+
+local function isOurGui(instance)
+    local p = instance
+    for _ = 1, 10 do
+        if not p then break end
+        if p.Name == "AlbayrakHUBGui" then return true end
+        p = p.Parent
+    end
+    return false
+end
+
+local function findAllTextBoxes(pg)
+    local boxes = {}
+    for _, gui in ipairs(pg:GetChildren()) do
+        if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "AlbayrakHUBGui" then
+            for _, d in ipairs(gui:GetDescendants()) do
+                if d:IsA("TextBox") and not isOurGui(d) then
+                    boxes[#boxes+1] = d
+                end
+            end
+        end
+    end
+    return boxes
+end
+
+local function isVisibleChain(inst)
+    local current = inst
+    while current do
+        if current:IsA("GuiObject") then
+            if not current.Visible then return false end
+        end
+        if current:IsA("ScreenGui") then
+            if not current.Enabled then return false end
+            return true
+        end
+        current = current.Parent
+    end
+    return true
+end
+
+local function findCodeButtons(pg)
+    local btns = {}
+    for _, gui in ipairs(pg:GetChildren()) do
+        if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "AlbayrakHUBGui" then
+            for _, d in ipairs(gui:GetDescendants()) do
+                if (d:IsA("TextButton") or d:IsA("ImageButton")) and not isOurGui(d) then
+                    local n  = d.Name:lower()
+                    local pn = (d.Parent and d.Parent.Name or ""):lower()
+                    if (n:find("code") or n:find("redeem") or pn:find("code") or pn:find("redeem"))
+                        and isVisibleChain(d) then
+                        btns[#btns+1] = d
+                    end
+                end
+            end
+        end
+    end
+    return btns
+end
+
+local function clickButton(btn)
+    if not btn then return false end
+    local methods = {}
+    
+    methods[#methods+1] = function() btn.MouseButton1Click:Fire() end
+    methods[#methods+1] = function() btn.Activated:Fire() end
+    
+    if typeof(firesignal) == "function" then
+        methods[#methods+1] = function() firesignal(btn.MouseButton1Click) end
+        methods[#methods+1] = function() firesignal(btn.Activated) end
+    end
+    
+    if typeof(getconns) == "function" then
+        methods[#methods+1] = function()
+            local ok, cs = pcall(getconns, btn.MouseButton1Click)
+            if ok and type(cs) == "table" then
+                for _, c in ipairs(cs) do pcall(function() c:Fire() end) end
+            end
+            local ok2, cs2 = pcall(getconns, btn.Activated)
+            if ok2 and type(cs2) == "table" then
+                for _, c in ipairs(cs2) do pcall(function() c:Fire() end) end
+            end
+        end
+    end
+    
+    if typeof(fireclick) == "function" then
+        methods[#methods+1] = function() fireclick(btn) end
+    end
+    
+    local anyOk = false
+    for _, fn in ipairs(methods) do
+        local ok = pcall(fn)
+        anyOk = anyOk or ok
+    end
+    return anyOk
+end
+
+local function writeCodeToBox(box, code)
+    if not box then return false end
+    pcall(function()
+        box.Text = code
+    end)
+    return box.Text == code
+end
+
+local function fireBoxFocusLost(box)
+    if not box then return false end
+    local anyFired = false
+    
+    if typeof(firesignal) == "function" then
+        local ok = pcall(firesignal, box.FocusLost, true)
+        anyFired = anyFired or ok
+    end
+    
+    if typeof(getconns) == "function" then
+        local ok, cs = pcall(getconns, box.FocusLost)
+        if ok and type(cs) == "table" then
+            for _, c in ipairs(cs) do
+                local fn
+                pcall(function() fn = c.Function end)
+                if fn and typeof(getupvalues) == "function" and typeof(setupv) == "function" then
+                    local uOk, ups = pcall(getupvalues, fn)
+                    if uOk and type(ups) == "table" then
+                        for i, v in pairs(ups) do
+                            if type(v) == "boolean" and v == true then
+                                pcall(setupv, fn, i, false)
+                            end
+                        end
+                    end
+                end
+                local fOk = pcall(function()
+                    if c.Enabled ~= false then c:Fire(true) end
+                end)
+                anyFired = anyFired or fOk
+            end
+        end
+    end
+    
+    return anyFired
+end
+
+local function typeAndSubmitCode(code)
+    if not LP then return false, "no LP" end
+    local pg = LP:FindFirstChildOfClass("PlayerGui")
+    if not pg then return false, "no PlayerGui" end
+
+    local codesGui = pg:FindFirstChild("Codes")
+    if codesGui then
+        if codesGui:IsA("ScreenGui") then
+            codesGui.Enabled = true
+        end
+        local codesFrame = codesGui:FindFirstChild("Codes") or codesGui
+        if codesFrame then
+            if codesFrame:IsA("GuiObject") then
+                codesFrame.Visible = true
+            end
+            local cur = codesFrame
+            while cur and cur ~= codesGui do
+                if cur:IsA("GuiObject") then cur.Visible = true end
+                cur = cur.Parent
+            end
+
+            local box = nil
+            for _, d in ipairs(codesFrame:GetDescendants()) do
+                if d:IsA("TextBox") and not isOurGui(d) then
+                    box = d
+                    break
+                end
+            end
+
+            local submitBtn = nil
+            for _, d in ipairs(codesFrame:GetDescendants()) do
+                if (d:IsA("TextButton") or d:IsA("ImageButton")) and not isOurGui(d) then
+                    local n = d.Name:lower()
+                    local txt = ""
+                    pcall(function() txt = d.Text:lower() end)
+                    if n:find("submit") or txt:find("submit") or n:find("redeem") or txt:find("redeem") or n:find("claim") or txt:find("confirm") or n:find("enter") then
+                        submitBtn = d
+                        break
+                    end
+                end
+            end
+            if not submitBtn then
+                for _, d in ipairs(codesFrame:GetDescendants()) do
+                    if (d:IsA("TextButton") or d:IsA("ImageButton")) and not isOurGui(d) then
+                        local n = d.Name:lower()
+                        if not n:find("close") and not n:find("x") and not n:find("toggle") then
+                            submitBtn = d
+                            break
+                        end
+                    end
+                end
+            end
+
+            if box then
+                writeCodeToBox(box, code)
+                task.wait(0.05)
+                if submitBtn then
+                    clickButton(submitBtn)
+                end
+                fireBoxFocusLost(box)
+                return true, "submitted via PlayerGui.Codes.Codes"
+            end
+        end
+    end
+
+    local function tryOpenPanel()
+        local btns = findCodeButtons(pg)
+        for _, btn in ipairs(btns) do
+            clickButton(btn)
+            task.wait(0.05)
+        end
+        return #btns > 0
+    end
+
+    tryOpenPanel()
+    task.wait(0.3)
+
+    local box = nil
+    local deadline = tick() + 3
+    while tick() < deadline do
+        local allBoxes = findAllTextBoxes(pg)
+        for _, d in ipairs(allBoxes) do
+            if isVisibleChain(d) then
+                local n   = d.Name:lower()
+                local pn  = (d.Parent and d.Parent.Name or ""):lower()
+                if n:find("code") or pn:find("code") or n:find("redeem") or pn:find("redeem") or n:find("input") or pn:find("input") or n:find("textbox") or n:find("enter") then
+                    box = d
+                    break
+                end
+            end
+        end
+        if not box then
+            for _, d in ipairs(allBoxes) do
+                if isVisibleChain(d) then box = d; break end
+            end
+        end
+        if box then break end
+        task.wait(0.1)
+    end
+
+    if not box then return false, "no codebox visible" end
+
+    writeCodeToBox(box, code)
+    task.wait(0.05)
+
+    local redeemBtn = nil
+    local searchNames = {"submit","redeem","claim","confirm","enter","send","apply","ok","use","go","check"}
+    local p = box.Parent
+    for _ = 1, 8 do
+        if not p then break end
+        for _, d in ipairs(p:GetDescendants()) do
+            if (d:IsA("TextButton") or d:IsA("ImageButton")) and not isOurGui(d) and d ~= box then
+                local n = d.Name:lower()
+                local txt = ""
+                pcall(function() txt = d.Text:lower() end)
+                for _, sn in ipairs(searchNames) do
+                    if n:find(sn) or txt:find(sn) then
+                        if isVisibleChain(d) then
+                            redeemBtn = d
+                            break
+                        end
+                    end
+                end
+                if redeemBtn then break end
+            end
+        end
+        if redeemBtn then break end
+        p = p.Parent
+    end
+
+    if redeemBtn then
+        clickButton(redeemBtn)
+    end
+
+    fireBoxFocusLost(box)
+
+    return true, "fallback methods used"
+end
+
+local function resolveNotifyRemote()
+    if _G.PhiNotifyRemote then return _G.PhiNotifyRemote end
+    local Net = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Net")
+    local getinfo = debug and (debug.getinfo or debug.info)
+    if getgc and getinfo and getconnections then
+        for _, d in ipairs(Net:GetDescendants()) do
+            if d:IsA("RemoteEvent") then
+                local ok, cs = pcall(getconnections, d.OnClientEvent)
+                if ok then
+                    for _, c in ipairs(cs) do
+                        local f, fn = pcall(function() return c.Function end)
+                        if f and type(fn) == "function" then
+                            local i, info = pcall(getinfo, fn)
+                            if i and tostring(info.short_src or info.source or ""):find("NotificationController", 1, true) then
+                                return d
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local notifyRemote = resolveNotifyRemote()
+if not notifyRemote then
+    warn("[AlbayrakHUB] Notification remote not found - announcements won't be captured.")
+end
+
+if PlayerGui:FindFirstChild("AlbayrakHUBGui") then
+    PlayerGui.AlbayrakHUBGui:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AlbayrakHUBGui"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = PlayerGui
+
+-- Main Container
+local mainFrame = Instance.new("ImageLabel")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 210)
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -105)
+mainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 18)
+mainFrame.BackgroundTransparency = 0
+mainFrame.Image = ""
+mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
+mainFrame.ZIndex = 1
+mainFrame.Parent = screenGui
+
+-- Background image layer (behind everything)
+local bgImage = Instance.new("ImageLabel")
+bgImage.Name = "BgImage"
+bgImage.Size = UDim2.new(1, 0, 1, 0)
+bgImage.Position = UDim2.new(0, 0, 0, 0)
+bgImage.BackgroundTransparency = 1
+bgImage.BorderSizePixel = 0
+bgImage.ScaleType = Enum.ScaleType.Crop
+bgImage.ImageTransparency = 0.25
+bgImage.ZIndex = 0
+bgImage.Parent = mainFrame
+
+pcall(function()
+	if typeof(isfile) == "function" and isfile("albayrakhub_bg.jpg") and typeof(getcustomasset) == "function" then
+		bgImage.Image = getcustomasset("albayrakhub_bg.jpg")
+	elseif typeof(getcustomasset) == "function" then
+		-- try workspace-relative paths some executors use
+		for _, p in ipairs({"albayrakhub_bg.jpg", "workspace/albayrakhub_bg.jpg"}) do
+			local ok, asset = pcall(function() return getcustomasset(p) end)
+			if ok and asset then bgImage.Image = asset; break end
+		end
+	end
+end)
+
+-- Dark overlay so buttons stay readable
+local bgDim = Instance.new("Frame")
+bgDim.Name = "BgDim"
+bgDim.Size = UDim2.new(1, 0, 1, 0)
+bgDim.BackgroundColor3 = Color3.fromRGB(5, 5, 15)
+bgDim.BackgroundTransparency = 0.45
+bgDim.BorderSizePixel = 0
+bgDim.ZIndex = 1
+bgDim.Parent = mainFrame
+
+-- Falling / sliding AlbayrakHUB texts (behind buttons, in front of bg)
+local rainFolder = Instance.new("Folder")
+rainFolder.Name = "AlbayrakHUBRain"
+rainFolder.Parent = mainFrame
+
+local function spawnAlbayrakHUBText()
+	local lbl = Instance.new("TextLabel")
+	lbl.BackgroundTransparency = 1
+	lbl.BorderSizePixel = 0
+	lbl.Text = "AlbayrakHUB"
+	lbl.Font = Enum.Font.GothamBlack
+	lbl.TextSize = math.random(11, 18)
+	lbl.TextColor3 = Color3.fromRGB(
+		math.random(60, 120),
+		math.random(140, 220),
+		math.random(220, 255)
+	)
+	lbl.TextTransparency = math.random(25, 55) / 100
+	lbl.ZIndex = 2
+	lbl.Parent = rainFolder
+
+	local mode = math.random(1, 5)
+	-- 1 = fall top->bottom, 2 = left->right, 3 = right->left,
+	-- 4 = center outward down, 5 = diagonal
+	local duration = math.random(28, 55) / 10
+	local startPos, endPos
+
+	if mode == 1 then
+		local x = math.random(0, 85) / 100
+		startPos = UDim2.new(x, 0, -0.15, 0)
+		endPos = UDim2.new(x + (math.random(-10, 10) / 100), 0, 1.15, 0)
+	elseif mode == 2 then
+		local y = math.random(5, 90) / 100
+		startPos = UDim2.new(-0.35, 0, y, 0)
+		endPos = UDim2.new(1.2, 0, y + (math.random(-8, 8) / 100), 0)
+	elseif mode == 3 then
+		local y = math.random(5, 90) / 100
+		startPos = UDim2.new(1.2, 0, y, 0)
+		endPos = UDim2.new(-0.35, 0, y + (math.random(-8, 8) / 100), 0)
+	elseif mode == 4 then
+		startPos = UDim2.new(0.5, -20, -0.1, 0)
+		endPos = UDim2.new(math.random(5, 90) / 100, 0, 1.15, 0)
+	else
+		local fromLeft = math.random() > 0.5
+		startPos = UDim2.new(fromLeft and -0.3 or 1.15, 0, -0.1, 0)
+		endPos = UDim2.new(fromLeft and 1.15 or -0.3, 0, 1.1, 0)
+	end
+
+	lbl.Size = UDim2.new(0, 70, 0, 22)
+	lbl.Position = startPos
+	lbl.Rotation = math.random(-18, 18)
+
+	local tw = TweenService:Create(lbl, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+		Position = endPos,
+		TextTransparency = 1,
+		Rotation = lbl.Rotation + math.random(-25, 25)
+	})
+	tw:Play()
+	tw.Completed:Connect(function()
+		lbl:Destroy()
+	end)
+end
+
+task.spawn(function()
+	while mainFrame.Parent do
+		if #rainFolder:GetChildren() < 22 then
+			spawnAlbayrakHUBText()
+		end
+		task.wait(math.random(12, 35) / 100)
+	end
+end)
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 16)
+mainCorner.Parent = mainFrame
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(80, 160, 255)
+mainStroke.Thickness = 1.5
+mainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+mainStroke.Parent = mainFrame
+
+-- Top Bar Header
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.Size = UDim2.new(1, 0, 0, 44)
+topBar.Position = UDim2.new(0, 0, 0, 0)
+topBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+topBar.BackgroundTransparency = 0.4
+topBar.BorderSizePixel = 0
+topBar.ZIndex = 10
+topBar.Parent = mainFrame
+
+local topBarCorner = Instance.new("UICorner")
+topBarCorner.CornerRadius = UDim.new(0, 16)
+topBarCorner.Parent = topBar
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "Title"
+titleLabel.Size = UDim2.new(0, 200, 0, 14)
+titleLabel.Position = UDim2.new(0, 12, 0, 8)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Text = "AlbayrakHUB"
+titleLabel.TextColor3 = Color3.fromRGB(200, 220, 255) -- Dark Maroon Title
+titleLabel.TextSize = 11
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = topBar
+
+local subLabel = Instance.new("TextLabel")
+subLabel.Name = "Subtitle"
+subLabel.Size = UDim2.new(0, 200, 0, 12)
+subLabel.Position = UDim2.new(0, 12, 0, 25)
+subLabel.BackgroundTransparency = 1
+subLabel.Font = Enum.Font.Gotham
+subLabel.Text = ""
+subLabel.TextColor3 = Color3.fromRGB(120, 30, 35)
+subLabel.TextSize = 10
+subLabel.TextXAlignment = Enum.TextXAlignment.Left
+subLabel.Parent = topBar
+
+-- Status indicator (scan durumu)
+local statusDot = Instance.new("Frame")
+statusDot.Name = "StatusDot"
+statusDot.Size = UDim2.new(0, 10, 0, 10)
+statusDot.Position = UDim2.new(1, -48, 0, 17)
+statusDot.BackgroundColor3 = Color3.fromRGB(220, 40, 50)
+statusDot.BorderSizePixel = 0
+statusDot.Parent = topBar
+
+local dotCorner = Instance.new("UICorner")
+dotCorner.CornerRadius = UDim.new(1, 0)
+dotCorner.Parent = statusDot
+
+-- Minimize (-) button (saÄŸ Ã¼st)
+statusDot.Position = UDim2.new(1, -48, 0, 17)
+
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Name = "MinimizeBtn"
+minimizeBtn.Size = UDim2.new(0, 22, 0, 22)
+minimizeBtn.Position = UDim2.new(1, -30, 0, 11)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+minimizeBtn.BackgroundTransparency = 0.35
+minimizeBtn.BorderSizePixel = 0
+minimizeBtn.Text = "âˆ’"
+minimizeBtn.TextColor3 = Color3.fromRGB(90, 12, 18)
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.TextSize = 18
+minimizeBtn.AutoButtonColor = true
+minimizeBtn.ZIndex = 12
+minimizeBtn.Parent = topBar
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 6)
+minCorner.Parent = minimizeBtn
+
+-- Restore (+) floating button (minimized halde gÃ¶rÃ¼nÃ¼r)
+local restoreBtn = Instance.new("TextButton")
+restoreBtn.Name = "RestoreBtn"
+restoreBtn.Size = UDim2.new(0, 36, 0, 36)
+restoreBtn.Position = UDim2.new(1, -50, 0, 12)
+restoreBtn.BackgroundColor3 = Color3.fromRGB(45, 25, 85)
+restoreBtn.BorderSizePixel = 0
+restoreBtn.Text = "+"
+restoreBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+restoreBtn.Font = Enum.Font.GothamBold
+restoreBtn.TextSize = 22
+restoreBtn.Visible = false
+restoreBtn.AutoButtonColor = true
+restoreBtn.ZIndex = 100
+restoreBtn.Parent = screenGui
+
+local restoreCorner = Instance.new("UICorner")
+restoreCorner.CornerRadius = UDim.new(0, 10)
+restoreCorner.Parent = restoreBtn
+
+local restoreStroke = Instance.new("UIStroke")
+restoreStroke.Color = Color3.fromRGB(255, 255, 255)
+restoreStroke.Thickness = 1.5
+restoreStroke.Parent = restoreBtn
+
+local restoreGrad = Instance.new("UIGradient")
+restoreGrad.Rotation = 90
+restoreGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(45, 25, 85)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 45, 110)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(240, 110, 40))
+})
+restoreGrad.Parent = restoreBtn
+
+-- Start Scan Button
+local scanButton = Instance.new("TextButton")
+scanButton.Name = "ScanButton"
+scanButton.Size = UDim2.new(1, -24, 0, 30)
+scanButton.Position = UDim2.new(0, 12, 0, 52)
+scanButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+scanButton.BackgroundTransparency = 0.35
+scanButton.BorderSizePixel = 0
+scanButton.Font = Enum.Font.GothamBold
+scanButton.Text = "START SCAN"
+scanButton.TextColor3 = Color3.fromRGB(90, 12, 18)
+scanButton.TextSize = 11
+scanButton.AutoButtonColor = true
+scanButton.ZIndex = 10
+scanButton.Parent = mainFrame
+
+local scanCorner = Instance.new("UICorner")
+scanCorner.CornerRadius = UDim.new(0, 10)
+scanCorner.Parent = scanButton
+
+local scanStroke = Instance.new("UIStroke")
+scanStroke.Color = Color3.fromRGB(255, 2559999999, 255)
+scanStroke.Thickness = 1
+scanStroke.Parent = scanButton
+
+
+
+-- Word count (global messages to combine)
+local wordsMinus = Instance.new("TextButton")
+wordsMinus.Name = "WordsMinus"
+wordsMinus.Size = UDim2.new(0, 40, 0, 30)
+wordsMinus.Position = UDim2.new(0, 12, 0, 88)
+wordsMinus.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+wordsMinus.BackgroundTransparency = 0.35
+wordsMinus.BorderSizePixel = 0
+wordsMinus.Font = Enum.Font.GothamBold
+wordsMinus.Text = "âˆ’"
+wordsMinus.TextColor3 = Color3.fromRGB(90, 12, 18)
+wordsMinus.TextSize = 16
+wordsMinus.ZIndex = 10
+wordsMinus.Parent = mainFrame
+Instance.new("UICorner", wordsMinus).CornerRadius = UDim.new(0, 8)
+
+local wordsLabel = Instance.new("TextLabel")
+wordsLabel.Name = "WordsLabel"
+wordsLabel.Size = UDim2.new(1, -112, 0, 30)
+wordsLabel.Position = UDim2.new(0, 56, 0, 88)
+wordsLabel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+wordsLabel.BackgroundTransparency = 0.35
+wordsLabel.BorderSizePixel = 0
+wordsLabel.Font = Enum.Font.GothamBold
+wordsLabel.Text = "WORDS: 3"
+wordsLabel.TextColor3 = Color3.fromRGB(40, 45, 55)
+wordsLabel.TextSize = 11
+wordsLabel.ZIndex = 10
+wordsLabel.Parent = mainFrame
+Instance.new("UICorner", wordsLabel).CornerRadius = UDim.new(0, 8)
+
+local wordsPlus = Instance.new("TextButton")
+wordsPlus.Name = "WordsPlus"
+wordsPlus.Size = UDim2.new(0, 40, 0, 30)
+wordsPlus.Position = UDim2.new(1, -52, 0, 88)
+wordsPlus.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+wordsPlus.BackgroundTransparency = 0.35
+wordsPlus.BorderSizePixel = 0
+wordsPlus.Font = Enum.Font.GothamBold
+wordsPlus.Text = "+"
+wordsPlus.TextColor3 = Color3.fromRGB(90, 12, 18)
+wordsPlus.TextSize = 16
+wordsPlus.ZIndex = 10
+wordsPlus.Parent = mainFrame
+Instance.new("UICorner", wordsPlus).CornerRadius = UDim.new(0, 8)
+
+local previewBox = Instance.new("TextBox")
+previewBox.Name = "PreviewBox"
+previewBox.Size = UDim2.new(1, -102, 0, 30)
+previewBox.Position = UDim2.new(0, 12, 0, 124)
+previewBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+previewBox.BackgroundTransparency = 0.35
+previewBox.BorderSizePixel = 0
+previewBox.PlaceholderText = "Captured code..."
+previewBox.PlaceholderColor3 = Color3.fromRGB(130, 135, 145)
+previewBox.Text = ""
+previewBox.TextColor3 = Color3.fromRGB(40, 45, 55)
+previewBox.ClearTextOnFocus = false
+previewBox.Font = Enum.Font.GothamBold
+previewBox.TextSize = 11
+previewBox.TextXAlignment = Enum.TextXAlignment.Left
+previewBox.ZIndex = 10
+previewBox.Parent = mainFrame
+
+local boxCorner = Instance.new("UICorner")
+boxCorner.CornerRadius = UDim.new(0, 10)
+boxCorner.Parent = previewBox
+
+local boxStroke = Instance.new("UIStroke")
+boxStroke.Color = Color3.fromRGB(255, 255, 255)
+boxStroke.Thickness = 1
+boxStroke.Parent = previewBox
+
+local pad = Instance.new("UIPadding")
+pad.PaddingLeft = UDim.new(0, 8)
+pad.PaddingRight = UDim.new(0, 8)
+pad.Parent = previewBox
+
+-- Redeem Pill Button
+local redeemButton = Instance.new("TextButton")
+redeemButton.Name = "RedeemButton"
+redeemButton.Size = UDim2.new(0, 70, 0, 30)
+redeemButton.Position = UDim2.new(1, -82, 0, 124)
+redeemButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+redeemButton.BorderSizePixel = 0
+redeemButton.Text = "REDEEM"
+redeemButton.TextColor3 = Color3.fromRGB(90, 12, 18)
+redeemButton.Font = Enum.Font.GothamBold
+redeemButton.TextSize = 10
+redeemButton.AutoButtonColor = true
+redeemButton.ZIndex = 10
+redeemButton.Parent = mainFrame
+
+local redeemCorner = Instance.new("UICorner")
+redeemCorner.CornerRadius = UDim.new(0, 10)
+redeemCorner.Parent = redeemButton
+
+local redeemStroke = Instance.new("UIStroke")
+redeemStroke.Color = Color3.fromRGB(255, 255, 255)
+redeemStroke.Thickness = 1
+redeemStroke.Parent = redeemButton
+
+-- Bottom Controls Row
+local bottomRow = Instance.new("Frame")
+bottomRow.Name = "BottomRow"
+bottomRow.Size = UDim2.new(1, -24, 0, 30)
+bottomRow.Position = UDim2.new(0, 12, 0, 162)
+bottomRow.BackgroundTransparency = 1
+bottomRow.ZIndex = 10
+bottomRow.Parent = mainFrame
+
+local delayLabel = Instance.new("TextLabel")
+delayLabel.Name = "DelayLabel"
+delayLabel.Size = UDim2.new(0, 48, 1, 0)
+delayLabel.Position = UDim2.new(0, 10, 0, 0)
+delayLabel.BackgroundTransparency = 1
+delayLabel.Font = Enum.Font.GothamBold
+delayLabel.Text = "Delay:"
+delayLabel.TextColor3 = Color3.fromRGB(90, 95, 105)
+delayLabel.TextSize = 11
+delayLabel.TextXAlignment = Enum.TextXAlignment.Left
+delayLabel.Parent = bottomRow
+
+local delayBox = Instance.new("TextBox")
+delayBox.Name = "DelayBox"
+delayBox.Size = UDim2.new(0, 48, 1, 0)
+delayBox.Position = UDim2.new(0, 62, 0, 0)
+delayBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+delayBox.BackgroundTransparency = 0.35
+delayBox.BorderSizePixel = 0
+delayBox.Text = "0.5"
+delayBox.TextColor3 = Color3.fromRGB(40, 45, 55)
+delayBox.Font = Enum.Font.GothamBold
+delayBox.TextSize = 12
+delayBox.TextXAlignment = Enum.TextXAlignment.Center
+delayBox.ClearTextOnFocus = false
+delayBox.Parent = bottomRow
+
+local delayCorner = Instance.new("UICorner")
+delayCorner.CornerRadius = UDim.new(0, 10)
+delayCorner.Parent = delayBox
+
+local delayStroke = Instance.new("UIStroke")
+delayStroke.Color = Color3.fromRGB(255, 255, 255)
+delayStroke.Thickness = 1
+delayStroke.Parent = delayBox
+
+local setButton = Instance.new("TextButton")
+setButton.Name = "SetButton"
+setButton.Size = UDim2.new(0, 70, 1, 0)
+setButton.Position = UDim2.new(1, -70, 0, 0)
+setButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+setButton.BorderSizePixel = 0
+setButton.Text = "SET"
+setButton.TextColor3 = Color3.fromRGB(90, 12, 18)
+setButton.Font = Enum.Font.GothamBold
+setButton.TextSize = 10
+setButton.AutoButtonColor = true
+setButton.Parent = bottomRow
+
+local setCorner = Instance.new("UICorner")
+setCorner.CornerRadius = UDim.new(0, 10)
+setCorner.Parent = setButton
+
+local setStroke = Instance.new("UIStroke")
+setStroke.Color = Color3.fromRGB(255, 255, 255)
+setStroke.Thickness = 1
+setStroke.Parent = setButton
+
+-- Hover Animations
+local function applyHoverEffect(button)
+    local defaultColor = button.BackgroundColor3
+    local hoverColor = Color3.fromRGB(255, 255, 255)
+    button.MouseEnter:Connect(function()
+        TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = hoverColor, BackgroundTransparency = 0.1}):Play()
+    end)
+    button.MouseLeave:Connect(function()
+        TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = defaultColor, BackgroundTransparency = 0.35}):Play()
+    end)
+end
+applyHoverEffect(scanButton)
+
+local function whiteHover(btn)
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(240, 240, 245)}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
+    end)
+end
+whiteHover(setButton)
+whiteHover(redeemButton)
+
+-- Minimize / Restore
+local isMinimized = false
+
+local function minimizeMenu()
+    isMinimized = true
+    mainFrame.Visible = false
+    restoreBtn.Visible = true
+end
+
+local function restoreMenu()
+    isMinimized = false
+    mainFrame.Visible = true
+    restoreBtn.Visible = false
+end
+
+minimizeBtn.MouseButton1Click:Connect(minimizeMenu)
+restoreBtn.MouseButton1Click:Connect(restoreMenu)
+
+-- Mobile & PC Smooth Dragging Mechanics
+local dragging, dragInput, dragStart, startPos
+local function update(input)
+    local delta = input.Position - dragStart
+    mainFrame.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
+end
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+local scanning = false
+local buffer = {}
+local mode = 3
+local delay = 0.5
+
+local function updateDelay()
+    local val = tonumber(delayBox.Text)
+    if val and val >= 0.01 then
+        delay = val
+        print("[AlbayrakHUB] Delay set to:", delay)
+    else
+        delayBox.Text = tostring(delay)
+    end
+end
+
+delayBox.FocusLost:Connect(function(enter)
+    if enter then updateDelay() end
+end)
+
+delayBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local val = tonumber(delayBox.Text)
+    if val and val >= 0.01 then
+        delay = val
+    end
+end)
+
+setButton.MouseButton1Click:Connect(updateDelay)
+
+local function isValidCode(msg)
+    return msg:match("^[A-Za-z0-9]+$") ~= nil
+end
+
+local function updatePreview()
+    if #buffer == 0 then
+        previewBox.Text = ""
+        return
+    end
+    local count = math.min(#buffer, mode)
+    local combined = table.concat(buffer, "", 1, count)
+    previewBox.Text = combined
+end
+
+local function processBuffer()
+    if not scanning then return end
+    while #buffer >= mode do
+        local combined = table.concat(buffer, "", 1, mode)
+        buffer = {}
+        updatePreview()
+        typeAndSubmitCode(combined)
+        print("[AlbayrakHUB] Auto-redeemed: " .. combined)
+        task.wait(delay)
+    end
+    updatePreview()
+end
+
+local function onAnnouncement(txt)
+    if not scanning or not txt or txt == "" then return end
+    local msg = tostring(txt):match("^%s*(.-)%s*$") or ""
+    if msg == "" then return end
+    if not isValidCode(msg) then return end
+    table.insert(buffer, msg)
+    updatePreview()
+    if #buffer >= mode then
+        task.spawn(processBuffer)
+    end
+    print("[AlbayrakHUB] Captured: " .. msg .. " (" .. #buffer .. "/" .. mode .. ")")
+end
+
+local function toggleScan()
+    scanning = not scanning
+    if scanning then
+        scanButton.Text = "SCANNING..."
+        scanButton.BackgroundColor3 = Color3.fromRGB(120, 220, 140)
+        scanButton.BackgroundTransparency = 0.2
+        statusDot.BackgroundColor3 = Color3.fromRGB(50, 200, 80)
+        buffer = {}
+        updatePreview()
+        print("[AlbayrakHUB] Scanning started.")
+    else
+        scanButton.Text = "START SCAN"
+        scanButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        scanButton.BackgroundTransparency = 0.35
+        statusDot.BackgroundColor3 = Color3.fromRGB(220, 40, 50)
+        buffer = {}
+        updatePreview()
+        print("[AlbayrakHUB] Scanning stopped.")
+    end
+end
+
+scanButton.MouseButton1Click:Connect(toggleScan)
+
+local function manualRedeem()
+    local code = previewBox.Text
+    if code and code ~= "" then
+        typeAndSubmitCode(code)
+        print("[AlbayrakHUB] Manually redeemed: " .. code)
+        buffer = {}
+        updatePreview()
+    end
+end
+
+redeemButton.MouseButton1Click:Connect(manualRedeem)
+
+previewBox.FocusLost:Connect(function(enter)
+    if enter then manualRedeem() end
+end)
+
+
+local function updateWordsLabel()
+    wordsLabel.Text = "WORDS: " .. tostring(mode)
+end
+
+wordsMinus.MouseButton1Click:Connect(function()
+    mode = math.max(1, mode - 1)
+    updateWordsLabel()
+    if scanning and #buffer >= mode then
+        task.spawn(processBuffer)
+    end
+end)
+
+wordsPlus.MouseButton1Click:Connect(function()
+    mode = math.min(15, mode + 1)
+    updateWordsLabel()
+end)
+
+if notifyRemote then
+    notifyRemote.OnClientEvent:Connect(function(txt, ...)
+        onAnnouncement(txt)
+    end)
+else
+    warn("[AlbayrakHUB] No notify remote - announcements not captured.")
+end
+
+print("[AlbayrakHUB] Ready.")
+
+
+--============================================================
+-- AlbayrakHUB INTRO â€” 5s | no flash | matrix rain | AlbayrakHUB ON TOP
+--============================================================
+
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local PlayerGui = player:WaitForChild("PlayerGui")
+
+local MUSIC_FILE = "albayrakhub_intro_music.mp3"
+local MUSIC_URL = ""
+local MUSIC_VOLUME = 0.7
+local INTRO_DURATION = 5
+
+for _, name in ipairs({"ShadowVSIntro", "AlbayrakHUB Intro"}) do
+	local old = PlayerGui:FindFirstChild(name)
+	if old then old:Destroy() end
+end
+
+local introActive = true
+local introFinished = false
+local introSound = nil
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "AlbayrakHUB Intro"
+gui.IgnoreGuiInset = true
+gui.ResetOnSpawn = false
+gui.DisplayOrder = 999999
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = PlayerGui
+
+local background = Instance.new("Frame")
+background.Size = UDim2.fromScale(1, 1)
+background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+background.BorderSizePixel = 0
+background.ClipsDescendants = true
+background.Parent = gui
+
+-- matrix rain of AlbayrakHUB
+local rain = Instance.new("Folder")
+rain.Name = "MatrixRain"
+rain.Parent = background
+
+local function spawnRainDrop()
+	if not introActive or not background.Parent then return end
+	local lbl = Instance.new("TextLabel")
+	lbl.BackgroundTransparency = 1
+	lbl.Text = math.random() > 0.55 and "AlbayrakHUB" or "AlbayrakHUB"
+	lbl.Font = Enum.Font.Code
+	lbl.TextSize = math.random(12, 22)
+	lbl.TextColor3 = Color3.fromRGB(
+		math.random(0, 40),
+		math.random(180, 255),
+		math.random(80, 200)
+	)
+	lbl.TextTransparency = math.random(0, 35) / 100
+	lbl.Size = UDim2.fromOffset(80, 24)
+	local x = math.random(0, 95) / 100
+	lbl.Position = UDim2.new(x, 0, -0.05, 0)
+	lbl.ZIndex = 5
+	lbl.Parent = rain
+	local dur = math.random(12, 28) / 10
+	local tw = TweenService:Create(lbl, TweenInfo.new(dur, Enum.EasingStyle.Linear), {
+		Position = UDim2.new(x, 0, 1.1, 0),
+		TextTransparency = 1
+	})
+	tw:Play()
+	tw.Completed:Connect(function()
+		if lbl.Parent then lbl:Destroy() end
+	end)
+end
+
+task.spawn(function()
+	while introActive and gui.Parent do
+		for _ = 1, math.random(2, 5) do
+			spawnRainDrop()
+		end
+		task.wait(0.08)
+	end
+end)
+
+-- Title
+local introTitle = Instance.new("TextLabel")
+introTitle.AnchorPoint = Vector2.new(0.5, 0.5)
+introTitle.Position = UDim2.fromScale(0.5, 0.5)
+introTitle.Size = UDim2.fromScale(0.95, 0.16)
+introTitle.BackgroundTransparency = 1
+introTitle.Text = "AlbayrakHUB ON TOP"
+introTitle.TextColor3 = Color3.fromRGB(80, 200, 255)
+introTitle.TextTransparency = 1
+introTitle.TextScaled = true
+introTitle.Font = Enum.Font.GothamBlack
+introTitle.ZIndex = 20
+introTitle.Parent = background
+
+local titleStroke = Instance.new("UIStroke")
+titleStroke.Color = Color3.fromRGB(20, 120, 255)
+titleStroke.Thickness = 3
+titleStroke.Transparency = 1
+titleStroke.Parent = introTitle
+
+-- Skip
+local skip = Instance.new("TextButton")
+skip.AnchorPoint = Vector2.new(1, 0)
+skip.Position = UDim2.new(1, -14, 0, 14)
+skip.Size = UDim2.fromOffset(100, 34)
+skip.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+skip.BackgroundTransparency = 0.2
+skip.BorderSizePixel = 0
+skip.Text = "SKIP"
+skip.TextColor3 = Color3.fromRGB(255, 255, 255)
+skip.TextSize = 12
+skip.Font = Enum.Font.GothamBold
+skip.ZIndex = 50
+skip.Parent = gui
+Instance.new("UICorner", skip).CornerRadius = UDim.new(0, 7)
+
+local function finishIntro()
+	if introFinished then return end
+	introFinished = true
+	introActive = false
+	if introSound then
+		pcall(function()
+			TweenService:Create(introSound, TweenInfo.new(0.25), { Volume = 0 }):Play()
+		end)
+		task.delay(0.3, function()
+			pcall(function() introSound:Stop(); introSound:Destroy() end)
+		end)
+	end
+	pcall(function() gui:Destroy() end)
+end
+
+skip.MouseButton1Click:Connect(finishIntro)
+
+-- music optional
+task.spawn(function()
+	local asset
+	pcall(function()
+		if isfile and isfile(MUSIC_FILE) and getcustomasset then
+			asset = getcustomasset(MUSIC_FILE)
+		end
+	end)
+	if not asset or not introActive then return end
+	introSound = Instance.new("Sound")
+	introSound.SoundId = asset
+	introSound.Volume = MUSIC_VOLUME
+	introSound.Parent = SoundService
+	pcall(function() introSound:Play() end)
+end)
+
+-- title fade in
+task.wait(0.35)
+if introActive then
+	TweenService:Create(introTitle, TweenInfo.new(0.5, Enum.EasingStyle.Quint), {
+		TextTransparency = 0
+	}):Play()
+	TweenService:Create(titleStroke, TweenInfo.new(0.5), { Transparency = 0.2 }):Play()
+end
+
+-- hold total ~5s then fade
+task.wait(INTRO_DURATION - 0.9)
+if not introActive then return end
+
+TweenService:Create(introTitle, TweenInfo.new(0.45), { TextTransparency = 1 }):Play()
+TweenService:Create(titleStroke, TweenInfo.new(0.45), { Transparency = 1 }):Play()
+task.wait(0.5)
+finishIntro()
